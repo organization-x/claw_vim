@@ -1,4 +1,3 @@
-use once_cell::sync::OnceCell;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,12 +7,20 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Clone, Default)]
-struct ResolvedEnv {
-    claude: Option<String>,
-    path: Option<String>,
+pub struct ResolvedEnv {
+    pub claude: Option<String>,
+    pub path: Option<String>,
 }
 
-static RESOLVED: OnceCell<ResolvedEnv> = OnceCell::new();
+// Cached login-shell resolution. Cached because it costs ~200ms (forks
+// a login shell), and is invoked on every PTY spawn. The setup screen's
+// "Recheck" action calls `invalidate_resolve_cache` so the user can
+// install `claude` and have us pick it up without restarting the app.
+static RESOLVED: Mutex<Option<ResolvedEnv>> = Mutex::new(None);
+
+pub fn invalidate_resolve_cache() {
+    *RESOLVED.lock().unwrap() = None;
+}
 
 fn login_shell_resolve() -> ResolvedEnv {
     let claude_direct = Command::new("which")
@@ -47,8 +54,14 @@ fn login_shell_resolve() -> ResolvedEnv {
     ResolvedEnv { claude, path }
 }
 
-fn resolved() -> ResolvedEnv {
-    RESOLVED.get_or_init(login_shell_resolve).clone()
+pub fn resolve_env() -> ResolvedEnv {
+    let mut guard = RESOLVED.lock().unwrap();
+    if let Some(env) = guard.as_ref() {
+        return env.clone();
+    }
+    let env = login_shell_resolve();
+    *guard = Some(env.clone());
+    env
 }
 
 pub struct PtySession {
@@ -86,7 +99,7 @@ pub fn pty_spawn(
     state: State<PtyState>,
     args: SpawnArgs,
 ) -> Result<String, String> {
-    let env = resolved();
+    let env = resolve_env();
     let claude = env
         .claude
         .clone()
@@ -217,5 +230,5 @@ pub fn pty_kill(state: State<PtyState>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn claude_path() -> Option<String> {
-    resolved().claude
+    resolve_env().claude
 }

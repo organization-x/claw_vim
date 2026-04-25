@@ -54,6 +54,10 @@ import { FuzzyFinder } from "./components/FuzzyFinder";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { SessionTabs } from "./components/SessionTabs";
 import { RepoInitPrompt } from "./components/RepoInitPrompt";
+import {
+  SetupScreen,
+  type SystemCheckResult,
+} from "./components/SetupScreen";
 import type {
   ChangeEntry,
   LineChange,
@@ -124,8 +128,30 @@ function App() {
   );
   const [loadNonce, setLoadNonce] = useState(0);
   const [lineChanges, setLineChanges] = useState<LineChange[]>([]);
+  const [systemCheck, setSystemCheck] = useState<SystemCheckResult | null>(
+    null,
+  );
+  const [checkingSystem, setCheckingSystem] = useState(true);
   const editorRef = useRef<EditorHandle>(null);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  const restoredFolderRef = useRef(false);
+
+  const setupNeeded =
+    !systemCheck || !systemCheck.claude.ok || !systemCheck.git.ok;
+
+  const runSystemCheck = useCallback(async () => {
+    setCheckingSystem(true);
+    try {
+      const sc = await invoke<SystemCheckResult>("system_check");
+      setSystemCheck(sc);
+    } finally {
+      setCheckingSystem(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void runSystemCheck();
+  }, [runSystemCheck]);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
@@ -338,12 +364,16 @@ function App() {
     refreshActiveFile,
   ]);
 
-  // Restore last-opened folder on mount
+  // Restore last-opened folder once the system check has passed.
+  // Gated on `setupNeeded` so we don't kick off worktree / PTY work
+  // before the user has the required tools installed.
   useEffect(() => {
+    if (setupNeeded || restoredFolderRef.current) return;
+    restoredFolderRef.current = true;
     const saved = localStorage.getItem(LAST_FOLDER_KEY);
     if (saved) void adoptFolder(saved, { silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [setupNeeded]);
 
   // Listen for status updates emitted by the Rust hooks server.
   useEffect(() => {
@@ -656,6 +686,16 @@ function App() {
       </div>
     </div>
   );
+
+  if (setupNeeded) {
+    return (
+      <SetupScreen
+        result={systemCheck}
+        checking={checkingSystem}
+        onRecheck={runSystemCheck}
+      />
+    );
+  }
 
   return (
     <div className="app">

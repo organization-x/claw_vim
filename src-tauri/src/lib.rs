@@ -2,6 +2,7 @@ mod fs;
 mod git;
 mod hooks;
 mod pty;
+mod setup;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,6 +34,7 @@ pub fn run() {
             pty::claude_path,
             hooks::hooks_endpoint,
             hooks::install_session_hooks,
+            setup::system_check,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

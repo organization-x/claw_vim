@@ -70,9 +70,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!hostRef.current) return;
 
     const term = new XTerm({
-      // Prefer Nerd Fonts for the icons + spinner glyphs Claude's TUI
-      // uses; fall through common monospace + symbol fonts so missing
-      // glyphs don't render as "??".
+      // Use the user's installed Nerd Font if they have one (it'll cover
+      // the full glyph range with consistent metrics). Otherwise fall back
+      // to system monospace + the bundled "Symbols Nerd Font Mono" we
+      // load via @font-face — the browser uses each font per-glyph, so
+      // text comes from SF Mono and icons come from the bundled font.
       fontFamily: [
         '"MesloLGS NF"',
         '"FiraCode Nerd Font Mono"',
@@ -83,6 +85,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         "Menlo",
         "Monaco",
         '"Courier New"',
+        '"Symbols Nerd Font Mono"', // bundled webview-only fallback for icons
         '"Apple Symbols"',
         "monospace",
       ].join(", "),

@@ -1,3 +1,22 @@
+/* Bundled Nerd Font symbols — covers the spinner / icon glyphs Claude's
+   TUI uses (Powerline, Octicons, Font Awesome, Material, etc). Scoped to
+   the icon Unicode ranges so normal text falls through to the system
+   monospace font. Added so the .dmg works out-of-the-box on a fresh Mac
+   without a manual `brew install --cask font-...` step. */
+@font-face {
+  font-family: "Symbols Nerd Font Mono";
+  src: url("/fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
+  font-display: block;
+  unicode-range:
+    U+E000-F8FF,        /* Private Use Area — covers most Nerd Font icons */
+    U+F0000-FFFFD,      /* Supplementary Private Use Area-A */
+    U+100000-10FFFD,    /* Supplementary Private Use Area-B */
+    U+2665,             /* Octicons heart */
+    U+26A1,             /* Octicons zap */
+    U+23FB-23FE,        /* IEC Power Symbols */
+    U+2B58;             /* IEC standby */
+}
+
 :root {
   --bg: #1e1e1e;
   --bg-elev: #252526;

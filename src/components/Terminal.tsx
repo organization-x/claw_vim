@@ -70,7 +70,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     if (!hostRef.current) return;
 
     const term = new XTerm({
-      fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
+      // Prefer Nerd Fonts for the icons + spinner glyphs Claude's TUI
+      // uses; fall through common monospace + symbol fonts so missing
+      // glyphs don't render as "??".
+      fontFamily: [
+        '"MesloLGS NF"',
+        '"FiraCode Nerd Font Mono"',
+        '"JetBrainsMono Nerd Font Mono"',
+        '"Hack Nerd Font Mono"',
+        '"Iosevka Nerd Font Mono"',
+        '"SF Mono"',
+        "Menlo",
+        "Monaco",
+        '"Courier New"',
+        '"Apple Symbols"',
+        "monospace",
+      ].join(", "),
       fontSize: 13,
       lineHeight: 1.2,
       theme: THEME,

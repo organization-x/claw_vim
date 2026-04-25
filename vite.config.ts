@@ -25,8 +25,16 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and any worktrees /
+      // hook config we create — clicking "+" writes a worktree under
+      // .claude-vim/, and Vite will full-reload the page on those file
+      // events otherwise.
+      ignored: [
+        "**/src-tauri/**",
+        "**/.claude-vim/**",
+        "**/.claude/**",
+        "**/target/**",
+      ],
     },
   },
 }));

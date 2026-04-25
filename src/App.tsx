@@ -1,3 +1,47 @@
+/**
+ * App — root component. Owns the session model and wires the three panes
+ * (file tree / editor / terminal) together.
+ *
+ * Sessions
+ * --------
+ * A "session" is one editing context. The first session ("main") points at
+ * the repo root itself; additional sessions each get their own git worktree
+ * on a fresh branch, created via `git_worktree_add` on the Rust side. Each
+ * session carries its own folder, file tree, change list, active file,
+ * editor buffer (saved + live), and view mode — see the `Session` type.
+ *
+ * Only one session is active at a time. Switching sessions captures the
+ * outgoing editor's live buffer back into its session record before unmount
+ * (see `switchSession`), so unsaved edits survive the swap.
+ *
+ * Editor buffer model
+ * -------------------
+ * `savedContent` is what's on disk; `liveContent` is what's in the editor.
+ * `dirty` is just `live !== saved`. Saving writes the file and collapses
+ * both back to the same value. The 5s tick (`refreshActiveFile`) pulls in
+ * external edits (e.g. Claude wrote to the open file) only when the buffer
+ * is clean — never clobbers unsaved work.
+ *
+ * Reloading the same path
+ * -----------------------
+ * `loadKey` includes a `loadNonce` that bumps on every `loadFile` call, so
+ * clicking an already-open file in the Changes panel still forces the
+ * editor to remount with fresh disk content. The dirty-prompt only gates
+ * switches to a *different* path; same-path reloads on a clean buffer go
+ * through immediately.
+ *
+ * Hooks server / status
+ * ---------------------
+ * `install_session_hooks` registers Claude Code hooks for the session;
+ * the Rust side emits `session:status` events that drive the colored dot
+ * in the tab strip (fresh / running / done / error).
+ *
+ * Repo gating
+ * -----------
+ * Multi-session only works in a git repo (worktrees need it). Picking a
+ * non-repo folder shows `RepoInitPrompt` — the user can `git init`, open
+ * single-session without git, or cancel.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { invoke } from "@tauri-apps/api/core";
@@ -14,10 +58,12 @@ import type {
   ChangeEntry,
   RepoInfo,
   Session,
+  SessionStatus,
   TreeNode,
   ViewMode,
   WorktreeInfo,
 } from "./types";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
 function flattenFiles(nodes: TreeNode[]): string[] {
@@ -190,6 +236,10 @@ function App() {
       localStorage.setItem(LAST_FOLDER_KEY, root);
       void refreshSessionTree(main.id, root);
       void refreshSessionChanges(main.id, root);
+      void invoke("install_session_hooks", {
+        folder: root,
+        sessionId: main.id,
+      }).catch(() => {});
     },
     [refreshSessionTree, refreshSessionChanges],
   );
@@ -222,6 +272,10 @@ function App() {
         setActiveSessionId(main.id);
         localStorage.setItem(LAST_FOLDER_KEY, folder);
         void refreshSessionTree(main.id, folder);
+        void invoke("install_session_hooks", {
+          folder,
+          sessionId: main.id,
+        }).catch(() => {});
       }
     },
     [pendingFolderInit, adoptFolder, refreshSessionTree],
@@ -250,6 +304,30 @@ function App() {
     const saved = localStorage.getItem(LAST_FOLDER_KEY);
     if (saved) void adoptFolder(saved, { silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Listen for status updates emitted by the Rust hooks server.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void (async () => {
+      const fn = await listen<{ sessionId: string; status: SessionStatus }>(
+        "session:status",
+        (event) => {
+          if (cancelled) return;
+          const { sessionId, status } = event.payload;
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+          );
+        },
+      );
+      if (cancelled) fn();
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const loadFile = useCallback(

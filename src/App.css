@@ -856,34 +856,40 @@ body,
 }
 
 .status-fresh {
-  background: #5c6370;
+  background: #8b95a5;
 }
 
 .status-idle {
-  background: #98c379;
+  background: #00e676;
+  box-shadow: 0 0 8px #00e676;
 }
 
 .status-working {
-  background: #e5c07b;
-  animation: pulse 1.4s ease-in-out infinite;
+  background: #ffeb3b;
+  box-shadow: 0 0 8px #ffeb3b;
+  animation: pulse 0.7s ease-in-out infinite;
 }
 
 .status-blocked {
-  background: #61afef;
-  box-shadow: 0 0 6px #61afef;
+  background: #ff1744;
+  box-shadow: 0 0 10px #ff1744;
+  animation: pulse 0.5s ease-in-out infinite;
 }
 
 .status-error {
-  background: #e06c75;
+  background: #ff1744;
+  box-shadow: 0 0 8px #ff1744;
 }
 
 @keyframes pulse {
   0%,
   100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.4;
+    opacity: 0.3;
+    transform: scale(0.7);
   }
 }
 

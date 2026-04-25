@@ -8,7 +8,8 @@ import { Terminal, type TerminalHandle } from "./components/Terminal";
 import { DirtyPrompt } from "./components/DirtyPrompt";
 import { FuzzyFinder } from "./components/FuzzyFinder";
 import { MarkdownPreview } from "./components/MarkdownPreview";
-import type { TreeNode } from "./types";
+import { SessionTabs } from "./components/SessionTabs";
+import type { Session, TreeNode, ViewMode } from "./types";
 import "./App.css";
 
 function flattenFiles(nodes: TreeNode[]): string[] {
@@ -32,33 +33,81 @@ function isMarkdown(path: string | null): boolean {
   return ext === "md" || ext === "markdown";
 }
 
+function newId(): string {
+  return `s-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function makeMainSession(): Session {
+  return {
+    id: newId(),
+    name: "main",
+    isMain: true,
+    status: "fresh",
+    activePath: null,
+    savedContent: "",
+    liveContent: "",
+    viewMode: "preview",
+  };
+}
+
+function makeWorktreeSession(id: string, index: number): Session {
+  return {
+    id,
+    name: `session ${index}`,
+    isMain: false,
+    status: "fresh",
+    activePath: null,
+    savedContent: "",
+    liveContent: "",
+    viewMode: "preview",
+  };
+}
+
 const LAST_FOLDER_KEY = "claudevim:lastFolder";
 
 function App() {
   const [folder, setFolder] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
-  const [activePath, setActivePath] = useState<string | null>(null);
-  const [savedContent, setSavedContent] = useState<string>("");
-  const [liveContent, setLiveContent] = useState<string>("");
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [fuzzyOpen, setFuzzyOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"source" | "split" | "preview">(
-    "preview",
-  );
   const editorRef = useRef<EditorHandle>(null);
   const terminalRef = useRef<TerminalHandle>(null);
 
   const fileList = useMemo(() => flattenFiles(tree), [tree]);
-  const dirty = liveContent !== savedContent;
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeSessionId) ?? null,
+    [sessions, activeSessionId],
+  );
+  const activePath = activeSession?.activePath ?? null;
+  const dirty = activeSession
+    ? activeSession.liveContent !== activeSession.savedContent
+    : false;
   const md = isMarkdown(activePath);
-  const effectiveMode: "source" | "split" | "preview" = md
-    ? viewMode
+  const effectiveMode: ViewMode = md
+    ? activeSession?.viewMode ?? "preview"
     : "source";
 
-  // Default to "preview" when a markdown file opens, "source" otherwise
+  const updateSession = useCallback(
+    (id: string, patch: Partial<Session>) => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      );
+    },
+    [],
+  );
+
+  // When the active file becomes/stops being markdown, normalize viewMode
   useEffect(() => {
-    setViewMode(md ? "preview" : "source");
-  }, [md, activePath]);
+    if (!activeSession) return;
+    if (md && activeSession.viewMode === "source") {
+      updateSession(activeSession.id, { viewMode: "preview" });
+    } else if (!md && activeSession.viewMode !== "source") {
+      updateSession(activeSession.id, { viewMode: "source" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [md, activeSession?.id, activeSession?.activePath]);
 
   const refreshTree = useCallback(async (root: string) => {
     const t = await invoke<TreeNode[]>("read_dir_tree", { path: root });
@@ -68,17 +117,19 @@ function App() {
   const adoptFolder = useCallback(
     async (picked: string) => {
       setFolder(picked);
-      setActivePath(null);
-      setSavedContent("");
-      setLiveContent("");
       try {
         await refreshTree(picked);
         localStorage.setItem(LAST_FOLDER_KEY, picked);
+        // Always start with a single "main" session
+        const main = makeMainSession();
+        setSessions([main]);
+        setActiveSessionId(main.id);
       } catch {
-        // Folder was deleted or unreadable — clear the saved entry.
         localStorage.removeItem(LAST_FOLDER_KEY);
         setFolder(null);
         setTree([]);
+        setSessions([]);
+        setActiveSessionId(null);
       }
     },
     [refreshTree],
@@ -97,21 +148,40 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadFile = useCallback(async (path: string) => {
-    const text = await invoke<string>("read_file_text", { path });
-    setActivePath(path);
-    setSavedContent(text);
-    setLiveContent(text);
-  }, []);
+  const loadFile = useCallback(
+    async (path: string) => {
+      if (!activeSessionId) return;
+      const text = await invoke<string>("read_file_text", { path });
+      updateSession(activeSessionId, {
+        activePath: path,
+        savedContent: text,
+        liveContent: text,
+      });
+    },
+    [activeSessionId, updateSession],
+  );
 
   const saveCurrent = useCallback(
     async (text: string) => {
-      if (!activePath) return;
-      await invoke("write_file_text", { path: activePath, content: text });
-      setSavedContent(text);
-      setLiveContent(text);
+      if (!activeSession || !activeSession.activePath) return;
+      await invoke("write_file_text", {
+        path: activeSession.activePath,
+        content: text,
+      });
+      updateSession(activeSession.id, {
+        savedContent: text,
+        liveContent: text,
+      });
     },
-    [activePath],
+    [activeSession, updateSession],
+  );
+
+  const onContentChange = useCallback(
+    (text: string) => {
+      if (!activeSessionId) return;
+      updateSession(activeSessionId, { liveContent: text });
+    },
+    [activeSessionId, updateSession],
   );
 
   const requestSwitch = useCallback(
@@ -138,6 +208,42 @@ function App() {
       await loadFile(target);
     },
     [pendingPath, saveCurrent, loadFile],
+  );
+
+  // Session management — note: id is computed outside the setSessions updater
+  // so StrictMode's purity-check double-run doesn't generate two ids.
+  const createSession = useCallback(() => {
+    const id = newId();
+    setSessions((prev) => {
+      const idx = prev.filter((s) => !s.isMain).length + 1;
+      return [...prev, makeWorktreeSession(id, idx)];
+    });
+    setActiveSessionId(id);
+  }, []);
+
+  const closeSession = useCallback(
+    (id: string) => {
+      const remaining = sessions.filter((s) => s.id !== id);
+      setSessions(remaining);
+      if (id === activeSessionId) {
+        const fallback = remaining.find((s) => s.isMain) ?? remaining[0];
+        setActiveSessionId(fallback?.id ?? null);
+      }
+    },
+    [activeSessionId, sessions],
+  );
+
+  const switchSession = useCallback(
+    (id: string) => {
+      if (id === activeSessionId) return;
+      // Capture current editor buffer into the outgoing session before unmount
+      if (activeSessionId && editorRef.current) {
+        const live = editorRef.current.getContent();
+        updateSession(activeSessionId, { liveContent: live });
+      }
+      setActiveSessionId(id);
+    },
+    [activeSessionId, updateSession],
   );
 
   // Cmd/Ctrl+P → fuzzy finder
@@ -193,12 +299,20 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [folder, activePath, sendActiveToClaude]);
 
-  const viewModeButtons = md ? (
+  const setViewMode = useCallback(
+    (m: ViewMode) => {
+      if (!activeSessionId) return;
+      updateSession(activeSessionId, { viewMode: m });
+    },
+    [activeSessionId, updateSession],
+  );
+
+  const viewModeButtons = md && activeSession ? (
     <span className="view-modes">
       {(["source", "split", "preview"] as const).map((m) => (
         <button
           key={m}
-          className={`header-btn ${viewMode === m ? "active" : ""}`}
+          className={`header-btn ${activeSession.viewMode === m ? "active" : ""}`}
           onClick={() => setViewMode(m)}
         >
           {m[0].toUpperCase() + m.slice(1)}
@@ -211,8 +325,12 @@ function App() {
     <button
       className="header-btn"
       onClick={sendActiveToClaude}
-      disabled={!folder || !activePath}
-      title="Send @path to Claude (⌘L)"
+      disabled={!folder || !activePath || !activeSession?.isMain}
+      title={
+        activeSession?.isMain
+          ? "Send @path to Claude (⌘L)"
+          : "Worktree sessions wired up in M7.2"
+      }
     >
       Send to Claude ⌘L
     </button>
@@ -228,11 +346,12 @@ function App() {
   const editorEl = (
     <Editor
       ref={editorRef}
+      key={activeSession?.id ?? "none"}
       path={activePath}
-      initialContent={savedContent}
+      initialContent={activeSession?.liveContent ?? ""}
       dirty={dirty}
       onSave={saveCurrent}
-      onContentChange={setLiveContent}
+      onContentChange={onContentChange}
       onEdit={onVimEdit}
       headerRight={headerActions}
     />
@@ -249,7 +368,7 @@ function App() {
         )}
       </div>
       <div className="pane-body md-body">
-        <MarkdownPreview source={liveContent} />
+        <MarkdownPreview source={activeSession?.liveContent ?? ""} />
       </div>
     </div>
   );
@@ -286,7 +405,44 @@ function App() {
         </Panel>
         <Separator className="resize-handle" />
         <Panel defaultSize={34} minSize={20} className="pane">
-          <Terminal ref={terminalRef} folder={folder} />
+          <div className="right-pane">
+            {sessions.length > 0 && (
+              <SessionTabs
+                sessions={sessions}
+                activeId={activeSessionId}
+                onSelect={switchSession}
+                onCreate={createSession}
+                onClose={closeSession}
+              />
+            )}
+            <div className="right-pane-body">
+              {/* Terminal stays mounted for the main session; hidden when a non-main tab is active */}
+              <div
+                className="terminal-mount"
+                style={{
+                  display:
+                    activeSession?.isMain || sessions.length === 0
+                      ? "flex"
+                      : "none",
+                }}
+              >
+                <Terminal ref={terminalRef} folder={folder} />
+              </div>
+              {activeSession && !activeSession.isMain && (
+                <div className="pane-inner">
+                  <div className="empty-state session-placeholder">
+                    <p>
+                      <strong>{activeSession.name}</strong>
+                    </p>
+                    <p>
+                      Worktree-isolated sessions land in <code>M7.2</code>.
+                    </p>
+                    <p>Switch to <strong>main</strong> to use Claude.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </Panel>
       </Group>
       {pendingPath && activePath && (

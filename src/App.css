@@ -649,3 +649,157 @@ body,
   margin: 4px 0 0;
   white-space: pre-wrap;
 }
+
+.right-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.right-pane-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.terminal-mount {
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.session-tabs {
+  display: flex;
+  align-items: stretch;
+  background: #181818;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  user-select: none;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.session-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--fg-muted);
+  background: transparent;
+  white-space: nowrap;
+  border-top: 2px solid transparent;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+}
+
+.session-tab:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+}
+
+.session-tab.active {
+  background: var(--bg-pane);
+  color: var(--fg);
+  border-top-color: var(--accent);
+  border-bottom-color: var(--bg-pane);
+}
+
+.session-name {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 12px;
+}
+
+.session-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.session-tab:hover .session-close,
+.session-tab.active .session-close {
+  opacity: 1;
+}
+
+.session-close:hover {
+  color: #e06c75;
+}
+
+.session-add {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.session-add:hover {
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.status-fresh {
+  background: #5c6370;
+}
+
+.status-idle {
+  background: #98c379;
+}
+
+.status-working {
+  background: #e5c07b;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-blocked {
+  background: #61afef;
+  box-shadow: 0 0 6px #61afef;
+}
+
+.status-error {
+  background: #e06c75;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.session-placeholder {
+  padding: 32px 16px;
+  line-height: 1.7;
+}
+
+.session-placeholder code {
+  background: var(--bg-elev);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--fg);
+  font-size: 0.9em;
+}

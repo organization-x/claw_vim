@@ -36,10 +36,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const onSaveRef = useRef(onSave);
   const onChangeRef = useRef(onContentChange);
   const onEditRef = useRef(onEdit);
+  const initialContentRef = useRef(initialContent);
 
   onSaveRef.current = onSave;
   onChangeRef.current = onContentChange;
   onEditRef.current = onEdit;
+  initialContentRef.current = initialContent;
 
   useImperativeHandle(ref, () => ({
     getContent: () => viewRef.current?.state.doc.toString() ?? "",
@@ -102,15 +104,23 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When path/content changes, swap language and content
+  // When the open file changes, swap language and reload content from
+  // the latest snapshot. We deliberately *don't* depend on initialContent
+  // here — onContentChange writes the user's edits back to App state, which
+  // would otherwise re-fire this effect on every keystroke and clobber the
+  // editor doc in a feedback loop.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: initialContent },
+      changes: {
+        from: 0,
+        to: view.state.doc.length,
+        insert: initialContentRef.current,
+      },
       effects: langCompartment.current.reconfigure(languageFor(path ?? "")),
     });
-  }, [path, initialContent]);
+  }, [path]);
 
   return (
     <div className="pane-inner editor">

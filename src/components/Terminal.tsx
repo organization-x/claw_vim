@@ -116,30 +116,45 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     };
   }, []);
 
-  // Subscribe to pty:data and pty:exit
+  // Subscribe to pty:data and pty:exit. StrictMode-safe: if cleanup runs
+  // before `listen()` resolves, we eagerly unsubscribe once it does.
   useEffect(() => {
-    const unlisteners: Array<() => void> = [];
+    let cancelled = false;
+    let u1: (() => void) | null = null;
+    let u2: (() => void) | null = null;
 
     void (async () => {
-      const u1 = await listen<PtyDataEvent>("pty:data", (event) => {
+      const fn1 = await listen<PtyDataEvent>("pty:data", (event) => {
+        if (cancelled) return;
         const { id, data } = event.payload;
         if (id === ptyIdRef.current && termRef.current) {
           termRef.current.write(data);
         }
       });
-      unlisteners.push(u1);
+      if (cancelled) {
+        fn1();
+      } else {
+        u1 = fn1;
+      }
 
-      const u2 = await listen<PtyExitEvent>("pty:exit", (event) => {
+      const fn2 = await listen<PtyExitEvent>("pty:exit", (event) => {
+        if (cancelled) return;
         if (event.payload.id === ptyIdRef.current && termRef.current) {
           termRef.current.write("\r\n\x1b[33m[claude exited]\x1b[0m\r\n");
           ptyIdRef.current = null;
         }
       });
-      unlisteners.push(u2);
+      if (cancelled) {
+        fn2();
+      } else {
+        u2 = fn2;
+      }
     })();
 
     return () => {
-      unlisteners.forEach((fn) => fn());
+      cancelled = true;
+      u1?.();
+      u2?.();
     };
   }, []);
 

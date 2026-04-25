@@ -468,6 +468,102 @@ body,
   color: #fff;
 }
 
+.tree-list .row.file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.change-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 8px;
+  background: #5c6370;
+}
+
+.change-dot.change-modified {
+  background: #e5c07b;
+}
+.change-dot.change-added {
+  background: #98c379;
+}
+.change-dot.change-deleted {
+  background: #e06c75;
+}
+.change-dot.change-untracked {
+  background: #5c6370;
+}
+
+.change-letter {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.change-letter.change-modified {
+  color: #e5c07b;
+}
+.change-letter.change-added {
+  color: #98c379;
+}
+.change-letter.change-deleted {
+  color: #e06c75;
+}
+.change-letter.change-untracked {
+  color: #5c6370;
+}
+
+.tree-list .row.file.change-modified .file-name {
+  color: #e5c07b;
+}
+.tree-list .row.file.change-added .file-name {
+  color: #98c379;
+}
+.tree-list .row.file.change-deleted .file-name {
+  color: #e06c75;
+  text-decoration: line-through;
+}
+.tree-list .row.file.change-untracked .file-name {
+  color: #98c379;
+}
+
+.tree-list .row.file.active .file-name {
+  color: #fff;
+}
+
+.changes-section {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.changes-header {
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  padding: 6px 12px 4px;
+}
+
+.changes-list .row.file {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .empty-state {
   padding: 20px 12px;
   color: var(--fg-muted);

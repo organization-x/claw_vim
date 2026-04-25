@@ -126,3 +126,53 @@ pub fn git_worktree_remove(repo: String, path: String, branch: String) -> Result
     let _ = run_git(&repo_p, &["branch", "-D", &branch]);
     Ok(())
 }
+
+#[derive(Serialize)]
+pub struct ChangeEntry {
+    pub path: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub fn git_status(path: String) -> Result<Vec<ChangeEntry>, String> {
+    let p = PathBuf::from(&path);
+    if !p.is_dir() {
+        return Ok(Vec::new());
+    }
+    // Bail quietly if this isn't a git working tree.
+    if run_git(&p, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+        return Ok(Vec::new());
+    }
+    let raw = run_git(&p, &["status", "--porcelain"])?;
+    let mut entries = Vec::new();
+    for line in raw.lines() {
+        if line.len() < 3 {
+            continue;
+        }
+        let xy = &line[..2];
+        let rest = &line[3..];
+
+        // Renames look like: "R  old -> new" — show the new path.
+        let display_path = if let Some(idx) = rest.find(" -> ") {
+            rest[idx + 4..].to_string()
+        } else {
+            rest.to_string()
+        };
+
+        let status = if xy == "??" {
+            "untracked"
+        } else if xy.contains('D') {
+            "deleted"
+        } else if xy.contains('A') {
+            "added"
+        } else {
+            "modified"
+        };
+
+        entries.push(ChangeEntry {
+            path: display_path,
+            status: status.to_string(),
+        });
+    }
+    Ok(entries)
+}

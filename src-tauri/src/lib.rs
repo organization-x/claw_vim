@@ -16,6 +16,7 @@ pub fn run() {
             git::git_init,
             git::git_worktree_add,
             git::git_worktree_remove,
+            git::git_status,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

@@ -7,6 +7,17 @@ export interface TreeNode {
 
 export type DirtyAction = "save" | "discard" | "cancel";
 
+export type ChangeStatus =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "untracked";
+
+export interface ChangeEntry {
+  path: string;       // relative to the worktree
+  status: ChangeStatus;
+}
+
 export type SessionStatus =
   | "fresh"
   | "idle"
@@ -25,6 +36,7 @@ export interface Session {
   branch: string | null;   // null for main (uses checked-out branch); non-null for worktree sessions
   baseSha: string | null;  // commit the worktree branched from (null for main)
   tree: TreeNode[];
+  changes: ChangeEntry[];
   activePath: string | null;
   savedContent: string;
   liveContent: string;

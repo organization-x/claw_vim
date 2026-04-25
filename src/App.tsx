@@ -11,6 +11,7 @@ import { MarkdownPreview } from "./components/MarkdownPreview";
 import { SessionTabs } from "./components/SessionTabs";
 import { RepoInitPrompt } from "./components/RepoInitPrompt";
 import type {
+  ChangeEntry,
   RepoInfo,
   Session,
   TreeNode,
@@ -54,6 +55,7 @@ function makeMainSession(folder: string, branch: string | null): Session {
     branch,
     baseSha: null,
     tree: [],
+    changes: [],
     activePath: null,
     savedContent: "",
     liveContent: "",
@@ -73,6 +75,7 @@ function App() {
   const [pendingFolderInit, setPendingFolderInit] = useState<string | null>(
     null,
   );
+  const [loadNonce, setLoadNonce] = useState(0);
   const editorRef = useRef<EditorHandle>(null);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -126,6 +129,39 @@ function App() {
     [updateSession],
   );
 
+  const refreshSessionChanges = useCallback(
+    async (sessionId: string, folder: string) => {
+      try {
+        const c = await invoke<ChangeEntry[]>("git_status", { path: folder });
+        updateSession(sessionId, { changes: c });
+      } catch {
+        updateSession(sessionId, { changes: [] });
+      }
+    },
+    [updateSession],
+  );
+
+  // If the active file has been modified on disk (e.g. by Claude) and
+  // the buffer isn't dirty, pull the new content into the editor.
+  const refreshActiveFile = useCallback(async () => {
+    if (!activeSession || !activeSession.activePath) return;
+    if (activeSession.liveContent !== activeSession.savedContent) return;
+    try {
+      const text = await invoke<string>("read_file_text", {
+        path: activeSession.activePath,
+      });
+      if (text !== activeSession.savedContent) {
+        updateSession(activeSession.id, {
+          savedContent: text,
+          liveContent: text,
+        });
+        editorRef.current?.setContent(text);
+      }
+    } catch {
+      // file may have been deleted; ignore
+    }
+  }, [activeSession, updateSession]);
+
   const adoptFolder = useCallback(
     async (picked: string, opts: { silent?: boolean } = {}) => {
       let info: RepoInfo;
@@ -153,8 +189,9 @@ function App() {
       setActiveSessionId(main.id);
       localStorage.setItem(LAST_FOLDER_KEY, root);
       void refreshSessionTree(main.id, root);
+      void refreshSessionChanges(main.id, root);
     },
-    [refreshSessionTree],
+    [refreshSessionTree, refreshSessionChanges],
   );
 
   const openFolder = useCallback(async () => {
@@ -190,6 +227,24 @@ function App() {
     [pendingFolderInit, adoptFolder, refreshSessionTree],
   );
 
+  // Refresh changes + active file content for the active session every 5s
+  useEffect(() => {
+    if (!activeSession) return;
+    const id = activeSession.id;
+    const folder = activeSession.folder;
+    const tick = () => {
+      void refreshSessionChanges(id, folder);
+      void refreshActiveFile();
+    };
+    const handle = window.setInterval(tick, 5000);
+    return () => window.clearInterval(handle);
+  }, [
+    activeSession?.id,
+    activeSession?.folder,
+    refreshSessionChanges,
+    refreshActiveFile,
+  ]);
+
   // Restore last-opened folder on mount
   useEffect(() => {
     const saved = localStorage.getItem(LAST_FOLDER_KEY);
@@ -206,6 +261,11 @@ function App() {
         savedContent: text,
         liveContent: text,
       });
+      // Bump the load nonce so the editor's loadKey changes even when the
+      // user clicks the already-open file (e.g. in the Changes panel after
+      // Claude wrote to it).
+      setLoadNonce((n) => n + 1);
+      editorRef.current?.setContent(text);
     },
     [activeSessionId, updateSession],
   );
@@ -221,8 +281,9 @@ function App() {
         savedContent: text,
         liveContent: text,
       });
+      void refreshSessionChanges(activeSession.id, activeSession.folder);
     },
-    [activeSession, updateSession],
+    [activeSession, updateSession, refreshSessionChanges],
   );
 
   const onContentChange = useCallback(
@@ -235,8 +296,11 @@ function App() {
 
   const requestSwitch = useCallback(
     (next: string) => {
-      if (next === activePath) return;
-      if (dirty) {
+      // Note: we deliberately don't short-circuit when next === activePath,
+      // since the user often clicks an already-open file in the Changes panel
+      // specifically to pull in fresh content (e.g. after Claude wrote to it).
+      // Dirty-check still gates a destructive reload.
+      if (dirty && next !== activePath) {
         setPendingPath(next);
         return;
       }
@@ -287,6 +351,7 @@ function App() {
           branch: info.branch,
           baseSha: info.baseSha,
           tree: [],
+          changes: [],
           activePath: null,
           savedContent: "",
           liveContent: "",
@@ -296,7 +361,8 @@ function App() {
     });
     setActiveSessionId(id);
     void refreshSessionTree(id, info.path);
-  }, [repoRoot, isRepo, refreshSessionTree]);
+    void refreshSessionChanges(id, info.path);
+  }, [repoRoot, isRepo, refreshSessionTree, refreshSessionChanges]);
 
   const closeSession = useCallback(
     async (id: string) => {
@@ -333,12 +399,21 @@ function App() {
       }
       const incoming = sessions.find((s) => s.id === id);
       setActiveSessionId(id);
-      // Lazy-load tree if the incoming session never finished loading
-      if (incoming && incoming.tree.length === 0) {
-        void refreshSessionTree(id, incoming.folder);
+      if (incoming) {
+        if (incoming.tree.length === 0) {
+          void refreshSessionTree(id, incoming.folder);
+        }
+        // Always refresh on focus — Claude may have written files since.
+        void refreshSessionChanges(id, incoming.folder);
       }
     },
-    [activeSessionId, sessions, updateSession, refreshSessionTree],
+    [
+      activeSessionId,
+      sessions,
+      updateSession,
+      refreshSessionTree,
+      refreshSessionChanges,
+    ],
   );
 
   // Cmd/Ctrl+P → fuzzy finder
@@ -437,7 +512,7 @@ function App() {
   const editorEl = (
     <Editor
       ref={editorRef}
-      key={activeSession?.id ?? "none"}
+      loadKey={`${activeSession?.id ?? ""}::${activePath ?? ""}::${loadNonce}`}
       path={activePath}
       initialContent={activeSession?.liveContent ?? ""}
       dirty={dirty}
@@ -471,9 +546,20 @@ function App() {
           <FileTree
             folder={activeFolder}
             tree={activeSession?.tree ?? []}
+            changes={activeSession?.changes ?? []}
             active={activePath}
             onOpenFolder={openFolder}
             onSelect={requestSwitch}
+            onRefresh={() => {
+              if (activeSession) {
+                void refreshSessionTree(activeSession.id, activeSession.folder);
+                void refreshSessionChanges(
+                  activeSession.id,
+                  activeSession.folder,
+                );
+                void refreshActiveFile();
+              }
+            }}
           />
         </Panel>
         <Separator className="resize-handle" />

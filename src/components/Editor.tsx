@@ -14,9 +14,11 @@ import { languageFor } from "../lang";
 
 export interface EditorHandle {
   getContent: () => string;
+  setContent: (text: string) => void;
 }
 
 interface EditorProps {
+  loadKey: string;            // reload doc when this changes
   path: string | null;
   initialContent: string;
   dirty: boolean;
@@ -27,7 +29,16 @@ interface EditorProps {
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { path, initialContent, dirty, onSave, onContentChange, onEdit, headerRight },
+  {
+    loadKey,
+    path,
+    initialContent,
+    dirty,
+    onSave,
+    onContentChange,
+    onEdit,
+    headerRight,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +56,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
 
   useImperativeHandle(ref, () => ({
     getContent: () => viewRef.current?.state.doc.toString() ?? "",
+    setContent: (text: string) => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: text,
+        },
+      });
+    },
   }));
 
   // Mount once
@@ -104,8 +126,9 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the open file changes, swap language and reload content from
-  // the latest snapshot. We deliberately *don't* depend on initialContent
+  // When loadKey changes (session switch or different file in the same
+  // session), reload the doc from the latest snapshot in
+  // initialContentRef. We deliberately *don't* depend on initialContent
   // here — onContentChange writes the user's edits back to App state, which
   // would otherwise re-fire this effect on every keystroke and clobber the
   // editor doc in a feedback loop.
@@ -120,7 +143,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
       },
       effects: langCompartment.current.reconfigure(languageFor(path ?? "")),
     });
-  }, [path]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadKey]);
 
   return (
     <div className="pane-inner editor">

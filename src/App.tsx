@@ -32,6 +32,8 @@ function isMarkdown(path: string | null): boolean {
   return ext === "md" || ext === "markdown";
 }
 
+const LAST_FOLDER_KEY = "claudevim:lastFolder";
+
 function App() {
   const [folder, setFolder] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -63,15 +65,37 @@ function App() {
     setTree(t);
   }, []);
 
+  const adoptFolder = useCallback(
+    async (picked: string) => {
+      setFolder(picked);
+      setActivePath(null);
+      setSavedContent("");
+      setLiveContent("");
+      try {
+        await refreshTree(picked);
+        localStorage.setItem(LAST_FOLDER_KEY, picked);
+      } catch {
+        // Folder was deleted or unreadable — clear the saved entry.
+        localStorage.removeItem(LAST_FOLDER_KEY);
+        setFolder(null);
+        setTree([]);
+      }
+    },
+    [refreshTree],
+  );
+
   const openFolder = useCallback(async () => {
     const picked = await openDialog({ directory: true, multiple: false });
     if (typeof picked !== "string") return;
-    setFolder(picked);
-    setActivePath(null);
-    setSavedContent("");
-    setLiveContent("");
-    await refreshTree(picked);
-  }, [refreshTree]);
+    await adoptFolder(picked);
+  }, [adoptFolder]);
+
+  // Restore last-opened folder on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(LAST_FOLDER_KEY);
+    if (saved) void adoptFolder(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadFile = useCallback(async (path: string) => {
     const text = await invoke<string>("read_file_text", { path });

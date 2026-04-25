@@ -22,6 +22,45 @@ pub fn invalidate_resolve_cache() {
     *RESOLVED.lock().unwrap() = None;
 }
 
+/// Common per-user install locations we probe directly. Some of these
+/// (notably `~/.local/bin` and `~/.npm-global/bin`) aren't always on the
+/// login-shell PATH, so we check them ourselves as a fallback.
+fn common_bin_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        let home = std::path::PathBuf::from(&home);
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".bun/bin"));
+        dirs.push(home.join(".cargo/bin"));
+        dirs.push(home.join(".volta/bin"));
+        dirs.push(home.join(".nvm/versions/node").join("default/bin"));
+    }
+    dirs.push(std::path::PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(std::path::PathBuf::from("/usr/local/bin"));
+    dirs
+}
+
+fn probe_common_locations() -> Option<String> {
+    for d in common_bin_dirs() {
+        let candidate = d.join("claude");
+        if candidate.is_file() {
+            // Confirm it's actually executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = std::fs::metadata(&candidate) {
+                    if meta.permissions().mode() & 0o111 == 0 {
+                        continue;
+                    }
+                }
+            }
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
 fn login_shell_resolve() -> ResolvedEnv {
     let claude_direct = Command::new("which")
         .arg("claude")
@@ -33,25 +72,47 @@ fn login_shell_resolve() -> ResolvedEnv {
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-    let claude = claude_direct.or_else(|| {
-        Command::new(&shell)
-            .args(["-l", "-c", "command -v claude"])
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|s| !s.is_empty())
-    });
+    let claude = claude_direct
+        .or_else(|| {
+            Command::new(&shell)
+                .args(["-l", "-c", "command -v claude"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        // Last resort: probe well-known per-user install dirs so we work
+        // even if the user's login shell PATH doesn't include them.
+        .or_else(probe_common_locations);
 
-    let path = Command::new(&shell)
+    let mut path = Command::new(&shell)
         .args(["-l", "-c", "echo -n $PATH"])
         .output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
 
-    ResolvedEnv { claude, path }
+    // Ensure the common bin dirs are in the PATH we hand to the spawned
+    // claude — otherwise tools claude itself shells out to (node, git,
+    // ripgrep, etc.) may be missing even when we found claude itself.
+    for dir in common_bin_dirs() {
+        if let Some(s) = dir.to_str() {
+            if !path.split(':').any(|p| p == s) && std::path::Path::new(s).exists() {
+                if !path.is_empty() {
+                    path.push(':');
+                }
+                path.push_str(s);
+            }
+        }
+    }
+
+    ResolvedEnv {
+        claude,
+        path: if path.is_empty() { None } else { Some(path) },
+    }
 }
 
 pub fn resolve_env() -> ResolvedEnv {

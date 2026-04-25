@@ -1,14 +1,24 @@
-export function FileTree() {
+interface FileTreeProps {
+  files: string[];
+  active: string;
+  onSelect: (path: string) => void;
+}
+
+export function FileTree({ files, active, onSelect }: FileTreeProps) {
   return (
     <div className="pane-inner file-tree">
-      <div className="pane-header">Files</div>
+      <div className="pane-header">Samples</div>
       <div className="pane-body">
         <ul className="tree-list">
-          <li>src/</li>
-          <li className="indent">App.tsx</li>
-          <li className="indent">main.tsx</li>
-          <li>PLAN.md</li>
-          <li>package.json</li>
+          {files.map((f) => (
+            <li
+              key={f}
+              className={f === active ? "active" : undefined}
+              onClick={() => onSelect(f)}
+            >
+              {f}
+            </li>
+          ))}
         </ul>
       </div>
     </div>

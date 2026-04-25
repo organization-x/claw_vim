@@ -9,7 +9,14 @@ import { DirtyPrompt } from "./components/DirtyPrompt";
 import { FuzzyFinder } from "./components/FuzzyFinder";
 import { MarkdownPreview } from "./components/MarkdownPreview";
 import { SessionTabs } from "./components/SessionTabs";
-import type { Session, TreeNode, ViewMode } from "./types";
+import { RepoInitPrompt } from "./components/RepoInitPrompt";
+import type {
+  RepoInfo,
+  Session,
+  TreeNode,
+  ViewMode,
+  WorktreeInfo,
+} from "./types";
 import "./App.css";
 
 function flattenFiles(nodes: TreeNode[]): string[] {
@@ -37,25 +44,16 @@ function newId(): string {
   return `s-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeMainSession(): Session {
+function makeMainSession(folder: string, branch: string | null): Session {
   return {
     id: newId(),
     name: "main",
     isMain: true,
     status: "fresh",
-    activePath: null,
-    savedContent: "",
-    liveContent: "",
-    viewMode: "preview",
-  };
-}
-
-function makeWorktreeSession(id: string, index: number): Session {
-  return {
-    id,
-    name: `session ${index}`,
-    isMain: false,
-    status: "fresh",
+    folder,
+    branch,
+    baseSha: null,
+    tree: [],
     activePath: null,
     savedContent: "",
     liveContent: "",
@@ -66,21 +64,28 @@ function makeWorktreeSession(id: string, index: number): Session {
 const LAST_FOLDER_KEY = "claudevim:lastFolder";
 
 function App() {
-  const [folder, setFolder] = useState<string | null>(null);
-  const [tree, setTree] = useState<TreeNode[]>([]);
+  const [repoRoot, setRepoRoot] = useState<string | null>(null);
+  const [isRepo, setIsRepo] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [fuzzyOpen, setFuzzyOpen] = useState(false);
+  const [pendingFolderInit, setPendingFolderInit] = useState<string | null>(
+    null,
+  );
   const editorRef = useRef<EditorHandle>(null);
-  const terminalRef = useRef<TerminalHandle>(null);
+  const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
-  const fileList = useMemo(() => flattenFiles(tree), [tree]);
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId],
   );
+  const activeFolder = activeSession?.folder ?? null;
   const activePath = activeSession?.activePath ?? null;
+  const fileList = useMemo(
+    () => (activeSession ? flattenFiles(activeSession.tree) : []),
+    [activeSession],
+  );
   const dirty = activeSession
     ? activeSession.liveContent !== activeSession.savedContent
     : false;
@@ -98,7 +103,7 @@ function App() {
     [],
   );
 
-  // When the active file becomes/stops being markdown, normalize viewMode
+  // Normalize viewMode when active file's md-ness changes
   useEffect(() => {
     if (!activeSession) return;
     if (md && activeSession.viewMode === "source") {
@@ -109,30 +114,47 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [md, activeSession?.id, activeSession?.activePath]);
 
-  const refreshTree = useCallback(async (root: string) => {
-    const t = await invoke<TreeNode[]>("read_dir_tree", { path: root });
-    setTree(t);
-  }, []);
-
-  const adoptFolder = useCallback(
-    async (picked: string) => {
-      setFolder(picked);
+  const refreshSessionTree = useCallback(
+    async (sessionId: string, folder: string) => {
       try {
-        await refreshTree(picked);
-        localStorage.setItem(LAST_FOLDER_KEY, picked);
-        // Always start with a single "main" session
-        const main = makeMainSession();
-        setSessions([main]);
-        setActiveSessionId(main.id);
+        const t = await invoke<TreeNode[]>("read_dir_tree", { path: folder });
+        updateSession(sessionId, { tree: t });
       } catch {
-        localStorage.removeItem(LAST_FOLDER_KEY);
-        setFolder(null);
-        setTree([]);
-        setSessions([]);
-        setActiveSessionId(null);
+        updateSession(sessionId, { tree: [] });
       }
     },
-    [refreshTree],
+    [updateSession],
+  );
+
+  const adoptFolder = useCallback(
+    async (picked: string, opts: { silent?: boolean } = {}) => {
+      let info: RepoInfo;
+      try {
+        info = await invoke<RepoInfo>("git_check_repo", { path: picked });
+      } catch {
+        info = { isRepo: false, root: null, head: null, branch: null };
+      }
+
+      if (!info.isRepo) {
+        if (opts.silent) {
+          // auto-restore: if folder is no longer a repo, don't reopen
+          localStorage.removeItem(LAST_FOLDER_KEY);
+          return;
+        }
+        setPendingFolderInit(picked);
+        return;
+      }
+
+      const root = info.root ?? picked;
+      setRepoRoot(root);
+      setIsRepo(true);
+      const main = makeMainSession(root, info.branch ?? null);
+      setSessions([main]);
+      setActiveSessionId(main.id);
+      localStorage.setItem(LAST_FOLDER_KEY, root);
+      void refreshSessionTree(main.id, root);
+    },
+    [refreshSessionTree],
   );
 
   const openFolder = useCallback(async () => {
@@ -141,10 +163,37 @@ function App() {
     await adoptFolder(picked);
   }, [adoptFolder]);
 
+  const onRepoInitChoice = useCallback(
+    async (action: "init" | "skip" | "cancel") => {
+      const folder = pendingFolderInit;
+      setPendingFolderInit(null);
+      if (!folder || action === "cancel") return;
+      if (action === "init") {
+        try {
+          await invoke("git_init", { path: folder });
+        } catch (e) {
+          alert(`git init failed: ${e instanceof Error ? e.message : e}`);
+          return;
+        }
+        await adoptFolder(folder);
+      } else if (action === "skip") {
+        // Single-session mode: open without git, no worktree support
+        setRepoRoot(folder);
+        setIsRepo(false);
+        const main = makeMainSession(folder, null);
+        setSessions([main]);
+        setActiveSessionId(main.id);
+        localStorage.setItem(LAST_FOLDER_KEY, folder);
+        void refreshSessionTree(main.id, folder);
+      }
+    },
+    [pendingFolderInit, adoptFolder, refreshSessionTree],
+  );
+
   // Restore last-opened folder on mount
   useEffect(() => {
     const saved = localStorage.getItem(LAST_FOLDER_KEY);
-    if (saved) void adoptFolder(saved);
+    if (saved) void adoptFolder(saved, { silent: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -210,27 +259,68 @@ function App() {
     [pendingPath, saveCurrent, loadFile],
   );
 
-  // Session management — note: id is computed outside the setSessions updater
-  // so StrictMode's purity-check double-run doesn't generate two ids.
-  const createSession = useCallback(() => {
+  // Session management
+  const createSession = useCallback(async () => {
+    if (!repoRoot || !isRepo) return;
     const id = newId();
+    let info: WorktreeInfo;
+    try {
+      info = await invoke<WorktreeInfo>("git_worktree_add", {
+        repo: repoRoot,
+        sessionId: id,
+      });
+    } catch (e) {
+      alert(`Failed to create worktree: ${e instanceof Error ? e.message : e}`);
+      return;
+    }
+
     setSessions((prev) => {
       const idx = prev.filter((s) => !s.isMain).length + 1;
-      return [...prev, makeWorktreeSession(id, idx)];
+      return [
+        ...prev,
+        {
+          id,
+          name: `session ${idx}`,
+          isMain: false,
+          status: "fresh",
+          folder: info.path,
+          branch: info.branch,
+          baseSha: info.baseSha,
+          tree: [],
+          activePath: null,
+          savedContent: "",
+          liveContent: "",
+          viewMode: "preview",
+        } as Session,
+      ];
     });
     setActiveSessionId(id);
-  }, []);
+    void refreshSessionTree(id, info.path);
+  }, [repoRoot, isRepo, refreshSessionTree]);
 
   const closeSession = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      const target = sessions.find((s) => s.id === id);
       const remaining = sessions.filter((s) => s.id !== id);
       setSessions(remaining);
       if (id === activeSessionId) {
         const fallback = remaining.find((s) => s.isMain) ?? remaining[0];
         setActiveSessionId(fallback?.id ?? null);
       }
+      // Best-effort cleanup of the worktree
+      if (target && !target.isMain && target.branch && repoRoot) {
+        try {
+          await invoke("git_worktree_remove", {
+            repo: repoRoot,
+            path: target.folder,
+            branch: target.branch,
+          });
+        } catch {
+          // ignore
+        }
+      }
     },
-    [activeSessionId, sessions],
+    [activeSessionId, sessions, repoRoot],
   );
 
   const switchSession = useCallback(
@@ -241,15 +331,20 @@ function App() {
         const live = editorRef.current.getContent();
         updateSession(activeSessionId, { liveContent: live });
       }
+      const incoming = sessions.find((s) => s.id === id);
       setActiveSessionId(id);
+      // Lazy-load tree if the incoming session never finished loading
+      if (incoming && incoming.tree.length === 0) {
+        void refreshSessionTree(id, incoming.folder);
+      }
     },
-    [activeSessionId, updateSession],
+    [activeSessionId, sessions, updateSession, refreshSessionTree],
   );
 
   // Cmd/Ctrl+P → fuzzy finder
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "p" && folder) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "p" && activeFolder) {
         e.preventDefault();
         setFuzzyOpen(true);
       } else if (e.key === "Escape" && fuzzyOpen) {
@@ -258,7 +353,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [folder, fuzzyOpen]);
+  }, [activeFolder, fuzzyOpen]);
 
   const onFuzzyPick = useCallback(
     (path: string) => {
@@ -270,26 +365,26 @@ function App() {
 
   const onVimEdit = useCallback(
     (rel: string) => {
-      if (!folder) return;
-      const abs = rel.startsWith("/") ? rel : `${folder}/${rel}`;
+      if (!activeFolder) return;
+      const abs = rel.startsWith("/") ? rel : `${activeFolder}/${rel}`;
       requestSwitch(abs);
     },
-    [folder, requestSwitch],
+    [activeFolder, requestSwitch],
   );
 
   const sendActiveToClaude = useCallback(() => {
-    if (!folder || !activePath) return;
-    const rel = activePath.startsWith(folder + "/")
-      ? activePath.slice(folder.length + 1)
+    if (!activeFolder || !activePath || !activeSessionId) return;
+    const rel = activePath.startsWith(activeFolder + "/")
+      ? activePath.slice(activeFolder.length + 1)
       : activePath;
-    void terminalRef.current?.send(`@${rel} `);
-  }, [folder, activePath]);
+    void terminalRefs.current.get(activeSessionId)?.send(`@${rel} `);
+  }, [activeFolder, activePath, activeSessionId]);
 
   // Cmd/Ctrl+L → send @<relative-path> to Claude
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "l") {
-        if (folder && activePath) {
+        if (activeFolder && activePath) {
           e.preventDefault();
           sendActiveToClaude();
         }
@@ -297,7 +392,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [folder, activePath, sendActiveToClaude]);
+  }, [activeFolder, activePath, sendActiveToClaude]);
 
   const setViewMode = useCallback(
     (m: ViewMode) => {
@@ -325,12 +420,8 @@ function App() {
     <button
       className="header-btn"
       onClick={sendActiveToClaude}
-      disabled={!folder || !activePath || !activeSession?.isMain}
-      title={
-        activeSession?.isMain
-          ? "Send @path to Claude (⌘L)"
-          : "Worktree sessions wired up in M7.2"
-      }
+      disabled={!activeFolder || !activePath}
+      title="Send @path to Claude (⌘L)"
     >
       Send to Claude ⌘L
     </button>
@@ -378,8 +469,8 @@ function App() {
       <Group orientation="horizontal">
         <Panel defaultSize={18} minSize={10} className="pane">
           <FileTree
-            folder={folder}
-            tree={tree}
+            folder={activeFolder}
+            tree={activeSession?.tree ?? []}
             active={activePath}
             onOpenFolder={openFolder}
             onSelect={requestSwitch}
@@ -411,35 +502,24 @@ function App() {
                 sessions={sessions}
                 activeId={activeSessionId}
                 onSelect={switchSession}
-                onCreate={createSession}
+                onCreate={isRepo ? createSession : () => {}}
                 onClose={closeSession}
               />
             )}
             <div className="right-pane-body">
-              {/* Terminal stays mounted for the main session; hidden when a non-main tab is active */}
-              <div
-                className="terminal-mount"
-                style={{
-                  display:
-                    activeSession?.isMain || sessions.length === 0
-                      ? "flex"
-                      : "none",
-                }}
-              >
-                <Terminal ref={terminalRef} folder={folder} />
-              </div>
-              {activeSession && !activeSession.isMain && (
-                <div className="pane-inner">
-                  <div className="empty-state session-placeholder">
-                    <p>
-                      <strong>{activeSession.name}</strong>
-                    </p>
-                    <p>
-                      Worktree-isolated sessions land in <code>M7.2</code>.
-                    </p>
-                    <p>Switch to <strong>main</strong> to use Claude.</p>
-                  </div>
-                </div>
+              {sessions.map((s) => (
+                <Terminal
+                  key={s.id}
+                  ref={(handle) => {
+                    if (handle) terminalRefs.current.set(s.id, handle);
+                    else terminalRefs.current.delete(s.id);
+                  }}
+                  folder={s.folder}
+                  visible={s.id === activeSessionId}
+                />
+              ))}
+              {sessions.length === 0 && (
+                <Terminal folder={null} visible={true} />
               )}
             </div>
           </div>
@@ -451,12 +531,18 @@ function App() {
           onChoice={resolveDirty}
         />
       )}
-      {fuzzyOpen && folder && (
+      {fuzzyOpen && activeFolder && (
         <FuzzyFinder
           files={fileList}
-          folder={folder}
+          folder={activeFolder}
           onPick={onFuzzyPick}
           onClose={() => setFuzzyOpen(false)}
+        />
+      )}
+      {pendingFolderInit && (
+        <RepoInitPrompt
+          folder={pendingFolderInit}
+          onChoice={onRepoInitChoice}
         />
       )}
     </div>

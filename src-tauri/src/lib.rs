@@ -1,4 +1,5 @@
 mod fs;
+mod git;
 mod pty;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -11,6 +12,10 @@ pub fn run() {
             fs::read_dir_tree,
             fs::read_file_text,
             fs::write_file_text,
+            git::git_check_repo,
+            git::git_init,
+            git::git_worktree_add,
+            git::git_worktree_remove,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

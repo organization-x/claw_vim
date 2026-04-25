@@ -14,6 +14,7 @@ import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
   folder: string | null;
+  visible: boolean;
 }
 
 export interface TerminalHandle {
@@ -54,7 +55,7 @@ const THEME = {
 };
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
-  { folder },
+  { folder, visible },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -239,8 +240,35 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     [],
   );
 
+  // When this terminal becomes visible, refit and resize the PTY — xterm
+  // can't measure correctly while display:none, so the previous fit may
+  // be stale.
+  useEffect(() => {
+    if (!visible) return;
+    const raf = requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+      } catch {
+        return;
+      }
+      const id = ptyIdRef.current;
+      if (id && termRef.current) {
+        void invoke("pty_resize", {
+          id,
+          rows: termRef.current.rows,
+          cols: termRef.current.cols,
+        });
+      }
+      termRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [visible]);
+
   return (
-    <div className="pane-inner terminal">
+    <div
+      className="pane-inner terminal"
+      style={{ display: visible ? "flex" : "none" }}
+    >
       <div className="pane-header editor-header">
         <span>claude{folder ? ` — ${folder.split("/").pop()}` : ""}</span>
         <span className="header-right">

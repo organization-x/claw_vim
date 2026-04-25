@@ -14,6 +14,7 @@ pub struct DirEntry {
 
 const SKIP_DIRS: &[&str] = &[
     ".git",
+    ".claude-vim",
     "node_modules",
     "target",
     "dist",

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,6 +14,10 @@ import "@xterm/xterm/css/xterm.css";
 
 interface TerminalProps {
   folder: string | null;
+}
+
+export interface TerminalHandle {
+  send: (text: string) => Promise<void>;
 }
 
 interface PtyDataEvent {
@@ -42,7 +53,10 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-export function Terminal({ folder }: TerminalProps) {
+export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Terminal(
+  { folder },
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -197,6 +211,19 @@ export function Terminal({ folder }: TerminalProps) {
     setRestartTick((t) => t + 1);
   }, []);
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      send: async (text: string) => {
+        const id = ptyIdRef.current;
+        if (!id) return;
+        await invoke("pty_write", { id, data: text });
+        termRef.current?.focus();
+      },
+    }),
+    [],
+  );
+
   return (
     <div className="pane-inner terminal">
       <div className="pane-header editor-header">
@@ -230,4 +257,4 @@ export function Terminal({ folder }: TerminalProps) {
       />
     </div>
   );
-}
+});

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FileTree } from "./components/FileTree";
 import { Editor, type EditorHandle } from "./components/Editor";
-import { Terminal } from "./components/Terminal";
+import { Terminal, type TerminalHandle } from "./components/Terminal";
 import { DirtyPrompt } from "./components/DirtyPrompt";
 import { FuzzyFinder } from "./components/FuzzyFinder";
 import { MarkdownPreview } from "./components/MarkdownPreview";
@@ -44,6 +44,7 @@ function App() {
     "preview",
   );
   const editorRef = useRef<EditorHandle>(null);
+  const terminalRef = useRef<TerminalHandle>(null);
 
   const fileList = useMemo(() => flattenFiles(tree), [tree]);
   const dirty = liveContent !== savedContent;
@@ -146,6 +147,28 @@ function App() {
     [folder, requestSwitch],
   );
 
+  const sendActiveToClaude = useCallback(() => {
+    if (!folder || !activePath) return;
+    const rel = activePath.startsWith(folder + "/")
+      ? activePath.slice(folder.length + 1)
+      : activePath;
+    void terminalRef.current?.send(`@${rel} `);
+  }, [folder, activePath]);
+
+  // Cmd/Ctrl+L → send @<relative-path> to Claude
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "l") {
+        if (folder && activePath) {
+          e.preventDefault();
+          sendActiveToClaude();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [folder, activePath, sendActiveToClaude]);
+
   const viewModeButtons = md ? (
     <span className="view-modes">
       {(["source", "split", "preview"] as const).map((m) => (
@@ -160,6 +183,24 @@ function App() {
     </span>
   ) : null;
 
+  const sendButton = (
+    <button
+      className="header-btn"
+      onClick={sendActiveToClaude}
+      disabled={!folder || !activePath}
+      title="Send @path to Claude (⌘L)"
+    >
+      Send to Claude ⌘L
+    </button>
+  );
+
+  const headerActions = (
+    <>
+      {viewModeButtons}
+      {sendButton}
+    </>
+  );
+
   const editorEl = (
     <Editor
       ref={editorRef}
@@ -169,7 +210,7 @@ function App() {
       onSave={saveCurrent}
       onContentChange={setLiveContent}
       onEdit={onVimEdit}
-      headerRight={viewModeButtons}
+      headerRight={headerActions}
     />
   );
 
@@ -180,7 +221,7 @@ function App() {
           {activePath ?? "(no file)"} {dirty ? "● " : ""}— PREVIEW
         </span>
         {effectiveMode === "preview" && (
-          <span className="header-right">{viewModeButtons}</span>
+          <span className="header-right">{headerActions}</span>
         )}
       </div>
       <div className="pane-body md-body">
@@ -221,7 +262,7 @@ function App() {
         </Panel>
         <Separator className="resize-handle" />
         <Panel defaultSize={34} minSize={20} className="pane">
-          <Terminal folder={folder} />
+          <Terminal ref={terminalRef} folder={folder} />
         </Panel>
       </Group>
       {pendingPath && activePath && (

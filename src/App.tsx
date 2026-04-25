@@ -221,7 +221,7 @@ function App() {
         </Panel>
         <Separator className="resize-handle" />
         <Panel defaultSize={34} minSize={20} className="pane">
-          <Terminal />
+          <Terminal folder={folder} />
         </Panel>
       </Group>
       {pendingPath && activePath && (

@@ -617,3 +617,35 @@ body,
   background: #0c0c0c;
   font-family: "SF Mono", Menlo, Monaco, monospace;
 }
+
+.xterm-host {
+  flex: 1;
+  background: #0c0c0c;
+  padding: 6px 8px 0 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.xterm-host .xterm {
+  height: 100%;
+}
+
+.xterm-host .xterm-viewport {
+  background: transparent !important;
+}
+
+.terminal-error {
+  padding: 12px 16px;
+  margin: 8px;
+  background: rgba(224, 108, 117, 0.08);
+  border: 1px solid #e06c75;
+  border-radius: 4px;
+  color: #e06c75;
+  font-size: 12px;
+}
+
+.terminal-error pre {
+  background: transparent;
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}

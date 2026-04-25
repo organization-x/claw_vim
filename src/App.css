@@ -700,6 +700,30 @@ body,
   min-height: 0;
 }
 
+/* git diff gutter: a thin colored bar in the leftmost gutter column */
+.cm-changes-gutter {
+  width: 3px;
+  padding: 0 !important;
+  background: transparent;
+}
+
+.cm-changes-gutter .cm-gutterElement {
+  padding: 0;
+}
+
+.cm-change-bar {
+  width: 3px;
+  height: 100%;
+}
+
+.cm-change-added {
+  background: #00e676;
+}
+
+.cm-change-modified {
+  background: #61afef;
+}
+
 .cm-host > .cm-editor {
   width: 100%;
   height: 100%;

@@ -5,12 +5,66 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { EditorState, Compartment } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import {
+  EditorState,
+  Compartment,
+  RangeSet,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
+import { EditorView, gutter, GutterMarker, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { vim, Vim } from "@replit/codemirror-vim";
 import { languageFor } from "../lang";
+import type { LineChange } from "../types";
+
+class ChangeMarker extends GutterMarker {
+  constructor(readonly kind: "added" | "modified") {
+    super();
+  }
+  override toDOM() {
+    const el = document.createElement("div");
+    el.className = `cm-change-bar cm-change-${this.kind}`;
+    return el;
+  }
+}
+
+const setChangesEffect = StateEffect.define<RangeSet<ChangeMarker>>();
+
+const changesField = StateField.define<RangeSet<ChangeMarker>>({
+  create: () => RangeSet.empty,
+  update(value, tr) {
+    value = value.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setChangesEffect)) value = e.value;
+    }
+    return value;
+  },
+});
+
+const changesGutter = gutter({
+  class: "cm-changes-gutter",
+  markers: (view) => view.state.field(changesField),
+  initialSpacer: () => new ChangeMarker("modified"),
+});
+
+function buildChangeSet(
+  view: EditorView,
+  changes: LineChange[],
+): RangeSet<ChangeMarker> {
+  if (changes.length === 0) return RangeSet.empty;
+  const sorted = [...changes].sort((a, b) => a.line - b.line);
+  const builder = new RangeSetBuilder<ChangeMarker>();
+  const totalLines = view.state.doc.lines;
+  for (const c of sorted) {
+    if (c.line < 1 || c.line > totalLines) continue;
+    const line = view.state.doc.line(c.line);
+    builder.add(line.from, line.from, new ChangeMarker(c.kind));
+  }
+  return builder.finish();
+}
 
 export interface EditorHandle {
   getContent: () => string;
@@ -22,6 +76,7 @@ interface EditorProps {
   path: string | null;
   initialContent: string;
   dirty: boolean;
+  lineChanges: LineChange[];
   onSave: (content: string) => void;
   onContentChange: (content: string) => void;
   onEdit: (relPath: string) => void;
@@ -34,6 +89,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     path,
     initialContent,
     dirty,
+    lineChanges,
     onSave,
     onContentChange,
     onEdit,
@@ -106,6 +162,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         ]),
         langCompartment.current.of(languageFor(path ?? "")),
         oneDark,
+        changesField,
+        changesGutter,
         EditorView.theme({
           "&": { height: "100%" },
           ".cm-scroller": { fontFamily: '"SF Mono", Menlo, Monaco, monospace' },
@@ -145,6 +203,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadKey]);
+
+  // Push the latest line-change set into the gutter via StateEffect.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const set = buildChangeSet(view, lineChanges);
+    view.dispatch({ effects: setChangesEffect.of(set) });
+  }, [lineChanges]);
 
   return (
     <div className="pane-inner editor">

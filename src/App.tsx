@@ -56,6 +56,7 @@ import { SessionTabs } from "./components/SessionTabs";
 import { RepoInitPrompt } from "./components/RepoInitPrompt";
 import type {
   ChangeEntry,
+  LineChange,
   RepoInfo,
   Session,
   SessionStatus,
@@ -122,6 +123,7 @@ function App() {
     null,
   );
   const [loadNonce, setLoadNonce] = useState(0);
+  const [lineChanges, setLineChanges] = useState<LineChange[]>([]);
   const editorRef = useRef<EditorHandle>(null);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
@@ -186,6 +188,43 @@ function App() {
     },
     [updateSession],
   );
+
+  // Auto-refetch line-level diff for the editor's gutter whenever the
+  // active file changes (open / switch session / save / disk pull-in).
+  // Saves bump savedContent → refresh; refreshActiveFile picking up
+  // Claude's writes also bumps savedContent → refresh.
+  useEffect(() => {
+    if (!activeSession?.activePath) {
+      setLineChanges([]);
+      return;
+    }
+    let cancelled = false;
+    const folder = activeSession.folder;
+    const abs = activeSession.activePath;
+    const rel = abs.startsWith(folder + "/")
+      ? abs.slice(folder.length + 1)
+      : abs;
+    void invoke<LineChange[]>("git_diff_for_file", {
+      folder,
+      baseSha: activeSession.baseSha ?? null,
+      file: rel,
+    })
+      .then((lc) => {
+        if (!cancelled) setLineChanges(lc);
+      })
+      .catch(() => {
+        if (!cancelled) setLineChanges([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSession?.id,
+    activeSession?.activePath,
+    activeSession?.savedContent,
+    activeSession?.folder,
+    activeSession?.baseSha,
+  ]);
 
   // If the active file has been modified on disk (e.g. by Claude) and
   // the buffer isn't dirty, pull the new content into the editor.
@@ -594,6 +633,7 @@ function App() {
       path={activePath}
       initialContent={activeSession?.liveContent ?? ""}
       dirty={dirty}
+      lineChanges={lineChanges}
       onSave={saveCurrent}
       onContentChange={onContentChange}
       onEdit={onVimEdit}

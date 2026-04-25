@@ -18,6 +18,11 @@ export interface ChangeEntry {
   status: ChangeStatus;
 }
 
+export interface LineChange {
+  line: number;             // 1-indexed line in the current file
+  kind: "added" | "modified";
+}
+
 export type SessionStatus =
   | "fresh"
   | "idle"

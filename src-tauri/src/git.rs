@@ -141,6 +141,105 @@ pub struct ChangeEntry {
     pub status: String,
 }
 
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct LineChange {
+    pub line: u32,
+    pub kind: String, // "added" | "modified"
+}
+
+/// Pure parser for `git diff --unified=0` output.
+///
+/// Each hunk header looks like `@@ -<a>,<b> +<c>,<d> @@` where:
+///   - `a`/`b` = old start / count
+///   - `c`/`d` = new start / count
+///
+/// We classify lines in the new file at positions [c, c+d) as
+/// `"added"` if the deleted-side count `b == 0` (pure insertion) and
+/// `"modified"` otherwise. Pure-deletion hunks (`d == 0`) produce no
+/// markers — there's no line in the new file to mark.
+pub fn parse_diff_unified_zero(raw: &str) -> Vec<LineChange> {
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        if !line.starts_with("@@") {
+            continue;
+        }
+        // Examples: "@@ -10,2 +12,3 @@", "@@ -0,0 +1 @@", "@@ -5 +6,2 @@"
+        let after_first = match line.split_once("@@") {
+            Some((_, rest)) => rest,
+            None => continue,
+        };
+        let header = match after_first.split_once("@@") {
+            Some((h, _)) => h.trim(),
+            None => continue,
+        };
+
+        let mut new_count: u32 = 1;
+        let mut old_count: u32 = 1;
+        let mut new_start: u32 = 0;
+
+        for tok in header.split_whitespace() {
+            if let Some(rest) = tok.strip_prefix('-') {
+                let (_, c) = parse_range(rest);
+                old_count = c;
+            } else if let Some(rest) = tok.strip_prefix('+') {
+                let (s, c) = parse_range(rest);
+                new_start = s;
+                new_count = c;
+            }
+        }
+
+        if new_count == 0 {
+            continue; // pure deletion — nothing to mark in the new file
+        }
+
+        let kind = if old_count == 0 { "added" } else { "modified" };
+        for i in 0..new_count {
+            out.push(LineChange {
+                line: new_start + i,
+                kind: kind.to_string(),
+            });
+        }
+    }
+    out
+}
+
+fn parse_range(s: &str) -> (u32, u32) {
+    // "12,3" -> (12, 3) ; "12" -> (12, 1)
+    if let Some((a, b)) = s.split_once(',') {
+        (a.parse().unwrap_or(0), b.parse().unwrap_or(0))
+    } else {
+        (s.parse().unwrap_or(0), 1)
+    }
+}
+
+#[tauri::command]
+pub fn git_diff_for_file(
+    folder: String,
+    base_sha: Option<String>,
+    file: String,
+) -> Result<Vec<LineChange>, String> {
+    let p = PathBuf::from(&folder);
+    if !p.is_dir() {
+        return Ok(Vec::new());
+    }
+    if run_git(&p, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+        return Ok(Vec::new());
+    }
+    // Resolve the path argument git wants (relative to the worktree root,
+    // or absolute — git accepts either).
+    let base = base_sha.as_deref().unwrap_or("HEAD");
+    let raw = match run_git_raw(
+        &p,
+        &["diff", "--unified=0", "--no-color", base, "--", &file],
+    ) {
+        Ok(s) => s,
+        // File may be untracked, deleted, or git may not know the base sha
+        // yet — the diff is best-effort, so don't surface the error.
+        Err(_) => return Ok(Vec::new()),
+    };
+    Ok(parse_diff_unified_zero(&raw))
+}
+
 /// Pure parser for `git status --porcelain` output. Extracted so it's
 /// covered by unit tests without invoking git at all.
 pub fn parse_status_porcelain(raw: &str) -> Vec<ChangeEntry> {
@@ -546,5 +645,164 @@ mod tests {
             .find(|e| e.path == "brand-new.txt")
             .expect("untracked file should appear");
         assert_eq!(new.status, "untracked");
+    }
+
+    // ---- parse_diff_unified_zero ----
+
+    #[test]
+    fn diff_empty_input() {
+        assert!(parse_diff_unified_zero("").is_empty());
+    }
+
+    #[test]
+    fn diff_pure_addition_single_line() {
+        // file went from empty to one line
+        let raw = "@@ -0,0 +1 @@\n+hello\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].line, 1);
+        assert_eq!(changes[0].kind, "added");
+    }
+
+    #[test]
+    fn diff_pure_addition_range() {
+        // 3 brand-new lines starting at line 5
+        let raw = "@@ -4,0 +5,3 @@\n+a\n+b\n+c\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].line, 5);
+        assert_eq!(changes[1].line, 6);
+        assert_eq!(changes[2].line, 7);
+        for c in &changes {
+            assert_eq!(c.kind, "added");
+        }
+    }
+
+    #[test]
+    fn diff_modification_one_to_one() {
+        // line 10 replaced
+        let raw = "@@ -10 +10 @@\n-old\n+new\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].line, 10);
+        assert_eq!(changes[0].kind, "modified");
+    }
+
+    #[test]
+    fn diff_modification_range() {
+        // 2 lines became 3 (mix of -/+) — all 3 new lines are "modified"
+        let raw = "@@ -10,2 +10,3 @@\n-a\n-b\n+x\n+y\n+z\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].line, 10);
+        assert_eq!(changes[1].line, 11);
+        assert_eq!(changes[2].line, 12);
+        for c in &changes {
+            assert_eq!(c.kind, "modified");
+        }
+    }
+
+    #[test]
+    fn diff_pure_deletion_produces_no_markers() {
+        // Lines were removed; nothing to mark in the new file
+        let raw = "@@ -10,3 +9,0 @@\n-x\n-y\n-z\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert!(
+            changes.is_empty(),
+            "pure deletion shouldn't emit gutter marks (got {:?})",
+            changes
+        );
+    }
+
+    #[test]
+    fn diff_multi_hunk() {
+        let raw = "@@ -1 +1 @@\n-old\n+new\n@@ -10,0 +20,2 @@\n+a\n+b\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0].line, 1);
+        assert_eq!(changes[0].kind, "modified");
+        assert_eq!(changes[1].line, 20);
+        assert_eq!(changes[1].kind, "added");
+        assert_eq!(changes[2].line, 21);
+        assert_eq!(changes[2].kind, "added");
+    }
+
+    #[test]
+    fn diff_ignores_non_hunk_lines() {
+        // git also emits "diff --git", "index ...", "--- a/...", "+++ b/..."
+        let raw = "diff --git a/foo b/foo\nindex 123..456 100644\n--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-x\n+y\n";
+        let changes = parse_diff_unified_zero(raw);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].line, 1);
+        assert_eq!(changes[0].kind, "modified");
+    }
+
+    // ---- git_diff_for_file integration ----
+
+    #[test]
+    fn diff_for_file_on_modified_against_head() {
+        let dir = temp_subdir("diff-modified");
+        init_repo(&dir);
+        // Append a line so line 1 is unchanged but line 2 is added.
+        std::fs::write(dir.join("README.md"), "hello\nworld\n").unwrap();
+        let changes = git_diff_for_file(
+            dir.to_string_lossy().into_owned(),
+            None,
+            "README.md".to_string(),
+        )
+        .unwrap();
+        // We expect at least one "added" change for line 2.
+        assert!(
+            changes.iter().any(|c| c.line == 2 && c.kind == "added"),
+            "expected line 2 added, got {:?}",
+            changes
+        );
+    }
+
+    #[test]
+    fn diff_for_file_on_clean_repo_is_empty() {
+        let dir = temp_subdir("diff-clean");
+        init_repo(&dir);
+        let changes = git_diff_for_file(
+            dir.to_string_lossy().into_owned(),
+            None,
+            "README.md".to_string(),
+        )
+        .unwrap();
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn diff_for_file_against_explicit_base() {
+        let dir = temp_subdir("diff-base");
+        init_repo(&dir);
+        // Capture the SHA as our "session base", then make a commit on top.
+        let base = run_git(&dir, &["rev-parse", "HEAD"]).unwrap();
+        std::fs::write(dir.join("README.md"), "hello\nworld\n").unwrap();
+        run_git(&dir, &["add", "."]).unwrap();
+        run_git(&dir, &["commit", "-q", "-m", "second"]).unwrap();
+        let changes = git_diff_for_file(
+            dir.to_string_lossy().into_owned(),
+            Some(base),
+            "README.md".to_string(),
+        )
+        .unwrap();
+        assert!(
+            changes.iter().any(|c| c.line == 2 && c.kind == "added"),
+            "expected line 2 added vs base, got {:?}",
+            changes
+        );
+    }
+
+    #[test]
+    fn diff_for_file_on_non_repo_is_empty() {
+        let dir = temp_subdir("diff-no-repo");
+        let changes = git_diff_for_file(
+            dir.to_string_lossy().into_owned(),
+            None,
+            "anything".to_string(),
+        )
+        .unwrap();
+        assert!(changes.is_empty());
     }
 }

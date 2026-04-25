@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  type ReactNode,
 } from "react";
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -20,24 +21,24 @@ interface EditorProps {
   initialContent: string;
   dirty: boolean;
   onSave: (content: string) => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onContentChange: (content: string) => void;
   onEdit: (relPath: string) => void;
+  headerRight?: ReactNode;
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { path, initialContent, dirty, onSave, onDirtyChange, onEdit },
+  { path, initialContent, dirty, onSave, onContentChange, onEdit, headerRight },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
-  const initialRef = useRef(initialContent);
   const onSaveRef = useRef(onSave);
-  const onDirtyRef = useRef(onDirtyChange);
+  const onChangeRef = useRef(onContentChange);
   const onEditRef = useRef(onEdit);
 
   onSaveRef.current = onSave;
-  onDirtyRef.current = onDirtyChange;
+  onChangeRef.current = onContentChange;
   onEditRef.current = onEdit;
 
   useImperativeHandle(ref, () => ({
@@ -87,8 +88,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         }),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
-          const current = update.state.doc.toString();
-          onDirtyRef.current(current !== initialRef.current);
+          onChangeRef.current(update.state.doc.toString());
         }),
       ],
     });
@@ -106,18 +106,19 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    initialRef.current = initialContent;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: initialContent },
       effects: langCompartment.current.reconfigure(languageFor(path ?? "")),
     });
-    onDirtyRef.current(false);
   }, [path, initialContent]);
 
   return (
     <div className="pane-inner editor">
-      <div className="pane-header">
-        {path ?? "(no file)"} {dirty ? "● " : ""}— VIM
+      <div className="pane-header editor-header">
+        <span>
+          {path ?? "(no file)"} {dirty ? "● " : ""}— VIM
+        </span>
+        {headerRight && <span className="header-right">{headerRight}</span>}
       </div>
       <div ref={hostRef} className="cm-host" />
     </div>

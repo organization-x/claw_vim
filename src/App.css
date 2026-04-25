@@ -1,0 +1,124 @@
+:root {
+  --bg: #1e1e1e;
+  --bg-elev: #252526;
+  --bg-pane: #1e1e1e;
+  --border: #2d2d30;
+  --fg: #d4d4d4;
+  --fg-muted: #858585;
+  --accent: #569cd6;
+  --header-bg: #2d2d30;
+  --resize-handle: #2d2d30;
+  --resize-handle-hover: #007acc;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+    sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.app {
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.pane {
+  background: var(--bg-pane);
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.pane-header {
+  padding: 6px 12px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.pane-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px;
+}
+
+.pane-body pre {
+  margin: 0;
+  font-family: "SF Mono", Menlo, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+
+.resize-handle {
+  width: 1px;
+  background: var(--resize-handle);
+  position: relative;
+  cursor: col-resize;
+  flex-shrink: 0;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.resize-handle:hover,
+.resize-handle[data-resize-handle-active] {
+  background: var(--resize-handle-hover);
+}
+
+.tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 12px;
+}
+
+.tree-list li {
+  padding: 2px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-list li:hover {
+  background: var(--bg-elev);
+}
+
+.tree-list li.indent {
+  padding-left: 16px;
+}
+
+.terminal-body {
+  background: #0c0c0c;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+}

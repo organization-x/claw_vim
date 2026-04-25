@@ -96,6 +96,33 @@ body,
   background: var(--resize-handle-hover);
 }
 
+.tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tree-header .open-btn {
+  background: transparent;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tree-header .open-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.tree-body {
+  padding: 4px 0;
+}
+
 .tree-list {
   list-style: none;
   margin: 0;
@@ -104,27 +131,158 @@ body,
   font-size: 12px;
 }
 
-.tree-list li {
-  padding: 2px 0;
+.tree-list .row {
+  padding: 2px 8px;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.tree-list li:hover {
+.tree-list .row:hover {
   background: var(--bg-elev);
 }
 
-.tree-list li.indent {
-  padding-left: 16px;
+.tree-list .row.dir .chevron {
+  display: inline-block;
+  width: 12px;
+  color: var(--fg-muted);
+  margin-right: 2px;
 }
 
-.tree-list li.active {
+.tree-list .row.file.active {
   background: #094771;
   color: #fff;
 }
 
-.tree-list li {
-  padding: 2px 8px;
+.empty-state {
+  padding: 20px 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.empty-state button {
+  margin-top: 8px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 320px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.modal-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.modal-body {
+  color: var(--fg-muted);
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.modal-body code {
+  color: var(--fg);
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-actions button {
+  padding: 6px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.modal-actions button:hover {
+  background: var(--bg);
+}
+
+.modal-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.modal.fuzzy {
+  padding: 0;
+  width: 540px;
+  max-width: 80vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.fuzzy-input {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 14px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.fuzzy-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 360px;
+  overflow-y: auto;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+  font-size: 12px;
+}
+
+.fuzzy-list li {
+  padding: 4px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fuzzy-list li.selected {
+  background: #094771;
+  color: #fff;
+}
+
+.fuzzy-list li.empty {
+  color: var(--fg-muted);
+  cursor: default;
+  font-style: italic;
 }
 
 .cm-host {

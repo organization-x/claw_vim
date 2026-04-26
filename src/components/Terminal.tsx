@@ -92,6 +92,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       ].join(", "),
       fontSize: 13,
       lineHeight: 1.2,
+      letterSpacing: 0,
       theme: THEME,
       cursorBlink: true,
       allowProposedApi: true,
@@ -100,7 +101,29 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(hostRef.current);
-    requestAnimationFrame(() => fit.fit());
+
+    // Initial fit, plus a re-fit once webfonts finish loading. xterm measures
+    // character width once at fit time; if a fallback font is active during
+    // the first fit, Claude's box-drawing borders will misalign with the cell
+    // grid after the real font swaps in.
+    const refit = () => {
+      if (!fitRef.current || !termRef.current) return;
+      try {
+        fitRef.current.fit();
+      } catch {
+        return;
+      }
+      const id = ptyIdRef.current;
+      if (id) {
+        void invoke("pty_resize", {
+          id,
+          rows: termRef.current.rows,
+          cols: termRef.current.cols,
+        });
+      }
+    };
+    requestAnimationFrame(refit);
+    void document.fonts.ready.then(refit);
 
     term.onData((data) => {
       const id = ptyIdRef.current;
@@ -199,6 +222,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // ignore
         }
       }
+
+      // Wait for webfonts so the PTY is spawned with cols/rows measured
+      // against the final font, not a fallback. Resolves instantly after
+      // the first mount.
+      await document.fonts.ready;
 
       const term = termRef.current;
       const fit = fitRef.current;

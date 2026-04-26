@@ -616,6 +616,77 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [activeFolder, activePath, sendActiveToClaude]);
 
+  // Session/focus shortcuts:
+  //   Cmd/Ctrl+T          → new session
+  //   Cmd/Ctrl+W          → close active (non-main) session
+  //   Cmd/Ctrl+1..9       → jump to session N
+  //   Cmd/Ctrl+Alt+←/→    → prev/next session
+  //   Cmd/Ctrl+K          → focus terminal
+  //   Cmd/Ctrl+E          → focus editor
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      if (e.key === "t" && !e.shiftKey && !e.altKey) {
+        if (isRepo) {
+          e.preventDefault();
+          void createSession();
+        }
+        return;
+      }
+      if (e.key === "w" && !e.shiftKey && !e.altKey) {
+        const s = sessions.find((x) => x.id === activeSessionId);
+        if (s && !s.isMain) {
+          e.preventDefault();
+          void closeSession(s.id);
+        }
+        return;
+      }
+      if (e.key === "k" && !e.shiftKey && !e.altKey) {
+        if (activeSessionId) {
+          e.preventDefault();
+          terminalRefs.current.get(activeSessionId)?.focus();
+        }
+        return;
+      }
+      if (e.key === "e" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        editorRef.current?.focus();
+        return;
+      }
+      if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        const target = sessions[parseInt(e.key, 10) - 1];
+        if (target) {
+          e.preventDefault();
+          switchSession(target.id);
+        }
+        return;
+      }
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (sessions.length > 1 && activeSessionId) {
+          const i = sessions.findIndex((s) => s.id === activeSessionId);
+          if (i < 0) return;
+          e.preventDefault();
+          const delta = e.key === "ArrowRight" ? 1 : -1;
+          const next =
+            sessions[(i + delta + sessions.length) % sessions.length];
+          switchSession(next.id);
+        }
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [
+    isRepo,
+    sessions,
+    activeSessionId,
+    createSession,
+    closeSession,
+    switchSession,
+  ]);
+
   const setViewMode = useCallback(
     (m: ViewMode) => {
       if (!activeSessionId) return;

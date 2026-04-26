@@ -19,6 +19,7 @@ interface TerminalProps {
 
 export interface TerminalHandle {
   send: (text: string) => Promise<void>;
+  focus: () => void;
 }
 
 interface PtyDataEvent {
@@ -254,6 +255,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         await invoke("pty_write", { id, data: text });
         termRef.current?.focus();
       },
+      focus: () => termRef.current?.focus(),
     }),
     [],
   );

@@ -69,6 +69,7 @@ function buildChangeSet(
 export interface EditorHandle {
   getContent: () => string;
   setContent: (text: string) => void;
+  focus: () => void;
 }
 
 interface EditorProps {
@@ -123,6 +124,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
         },
       });
     },
+    focus: () => viewRef.current?.focus(),
   }));
 
   // Mount once

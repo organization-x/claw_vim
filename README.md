@@ -40,20 +40,34 @@ Built with [Tauri 2](https://tauri.app), React, and Rust.
   you on first launch if it's missing.
 - Git.
 
-## Run it
+## Install
+
+Prebuilt macOS bundles are published on GitHub:
+[organization-x/claw_vim releases](https://github.com/organization-x/claw_vim/releases).
+
+Grab the latest `.dmg`, open it, and drag **claude-vim** into `/Applications`.
+On first launch macOS may complain that the app is from an unidentified
+developer — right-click the app and choose **Open** to bypass Gatekeeper once.
+
+You'll still need the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)
+on your PATH; the app will walk you through installing it on first launch if
+it's missing.
+
+## Run from source
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-To build a distributable bundle:
+To build a distributable bundle yourself:
 
 ```bash
 npm run tauri build
 ```
 
-The bundle is written under `src-tauri/target/release/bundle/`.
+The bundle is written under `src-tauri/target/release/bundle/` — the macOS
+`.dmg` lands in `src-tauri/target/release/bundle/dmg/`.
 
 ## Using it
 
